@@ -73,12 +73,19 @@
   details.plates > summary:hover .pl-label{ color:var(--accent); }
   details.plates > summary:hover .pl-rule{ background:var(--accent); }
   .plate-grid{
-    display:flex; flex-wrap:wrap; gap:16px; justify-content:center; margin:24px 0 4px;
+    display:grid; grid-template-columns:repeat(auto-fill, 168px); gap:16px;
+    justify-content:center; margin:24px auto 4px; max-width:100%;
     animation:plates-in .4s ease both;
   }
   @keyframes plates-in{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:none; } }
+  /* Every thumbnail occupies the same fixed tile, regardless of the source
+     image's aspect ratio. object-fit:contain shows the whole image (a wide
+     one-line detail crop is letterboxed rather than blown out to 1000px+ wide,
+     which is what overflowed the sheet and overlapped its neighbours before).
+     The full-resolution image is one click away in the lightbox. */
   img.plate{
-    height:150px; width:auto; border:1px solid var(--rule); background:#fff;
+    width:168px; height:168px; object-fit:contain; padding:8px;
+    border:1px solid var(--rule); background:#fff;
     box-shadow:0 6px 16px rgba(40,33,22,.12); cursor:zoom-in;
     transition:transform .16s ease, box-shadow .16s ease;
   }
