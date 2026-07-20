@@ -685,6 +685,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   --grade-A: #9a7b32; --grade-B: #5070a0; --grade-C: #8b6030; --grade-D: #808080;
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
 :root{
   --grade-X: #9e9e9e;  /* ungraded — should not occur in a gated build */
   --status-lost: #8a8a8a; --status-market: #6a1b9a; --status-damaged: #7e5a1f;
@@ -1220,6 +1221,74 @@ ul.open-questions li::before {
   z-index: 9999;
 }
 .tooltip-host:hover::after { opacity: 1; }
+/* ---------------------------------------------------------------------------
+   NARROW VIEWPORTS (phones, small tablets)
+
+   The desktop explorer is a fixed-viewport app shell: a two-column grid whose
+   panes scroll independently inside 100vh. Below ~860px that model breaks —
+   the grid's own minimum width (360+420px) exceeds the viewport, so the right
+   panel is clipped off-screen and the body scrolls sideways (observed on an
+   iPhone, 2026-07-20). Here the shell unwinds into ONE column that scrolls as
+   an ordinary page: map, then copy list, then the copy card beneath them.
+   Every rule below only relaxes a desktop constraint; none restyles the
+   census's visual identity, which stays as specified in spec section 4.bis.
+   --------------------------------------------------------------------------- */
+@media (max-width: 860px) {
+  /* release the 100vh app-shell so the page scrolls normally */
+  html, body { height: auto; }
+  body { display: block; overflow-x: hidden; }
+
+  main.layout {
+    display: block; overflow: visible; flex: none; min-height: 0;
+  }
+  section.left {
+    display: block; overflow: visible; border-right: none;
+  }
+  section.right {
+    overflow: visible; padding: 20px 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* the map needs an explicit height once its grid track is gone */
+  #map { height: 44vh; min-height: 250px; }
+
+  ol.copy-list { overflow-y: visible; }
+
+  /* let long institution names and shelfmarks wrap instead of being
+     ellipsed to nothing in a narrow column */
+  .list-item { padding: 11px 14px; }
+  .list-item .label-block .title,
+  .list-item .label-block .city,
+  .list-item .label-block .assoc {
+    white-space: normal; overflow: visible; text-overflow: clip;
+  }
+
+  header.topbar { padding: 12px 14px; gap: 10px; }
+  header.topbar h1 { font-size: 17px; }
+  header.topbar .badges { margin-left: 0; }
+  nav.filters { padding: 10px 14px; gap: 8px; }
+  nav.filters .count-text { margin-left: 0; width: 100%; }
+
+  .overview { max-width: none; }
+
+  /* wide content scrolls inside itself, never the page body */
+  .copy-card table, .overview table, pre { display: block; overflow-x: auto; max-width: 100%; }
+  .copy-card { max-width: 100%; }
+
+  /* The card header is a flex row (title | status chips). At this width the
+     chip group gets crushed to ~80px while needing ~198px, and overflows the
+     page. Give the title its own line and let the chips sit beneath it. */
+  .copy-card .header-row { flex-wrap: wrap; }
+  .copy-card .header-row h2 { flex: 1 1 100%; min-width: 0; }
+  .copy-card .status-row { flex: 0 0 auto; max-width: 100%; }
+
+  /* shelfmarks, URLs and citation lines must break rather than push the page */
+  .copy-card, .copy-card a, .copy-card code, .overview, .overview a {
+    overflow-wrap: anywhere;
+  }
+  .copy-card dl { grid-template-columns: 1fr; gap: 2px 0; }
+  .copy-card dl dt { margin-top: 8px; }
+}
 </style>
 </head>
 <body>
@@ -1905,6 +1974,14 @@ function setActive(slug) {
 
   // Render card
   renderCard(copy);
+
+  // On the stacked narrow layout the card renders BELOW the map and the
+  // full copy list, so a tap would otherwise appear to do nothing. Bring
+  // it into view. Desktop keeps its side-by-side panes and needs no scroll.
+  if (window.matchMedia("(max-width: 860px)").matches) {
+    const card = document.getElementById("card-container");
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 // ---------------------------------------------------------------------------
