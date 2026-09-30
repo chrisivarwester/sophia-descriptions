@@ -265,10 +265,39 @@ async function gh(path, raw = false) {
       'X-GitHub-Api-Version': '2022-11-28',
     },
   });
-  if (!res.ok) { const e = new Error(`GitHub answered ${res.status}`); e.status = res.status; throw e; }
+  if (!res.ok) {
+    const e = new Error(`GitHub answered ${res.status}`); e.status = res.status;
+    try { e.detail = (await res.json()).message || ''; } catch (_) { e.detail = ''; }
+    throw e;
+  }
   return res.json();
 }
 const R = `/repos/${CFG.owner}/${CFG.repo}`;
+
+// A 403/404 on the data file has three usual causes; two cheap probes tell
+// them apart so the screen can name the exact box to tick on github.com.
+async function diagnose(e) {
+  const fix = 'On github.com open the key (Settings → Developer settings → Personal access tokens → Fine-grained tokens), ';
+  let user = null, repo = null;
+  try { user = await gh('/user'); } catch (x) { if (x.status === 401) return 'GitHub does not recognise the key at all (401) — it was mistyped, or has expired.'; }
+  try { repo = await gh(R); } catch (x) { repo = x; }
+  if (repo && repo.status === 404) {
+    return `The key does not include the ${CFG.repo} repository (GitHub hides it: 404). ${fix}set Repository access to “Only select repositories” and pick ${CFG.repo} — “Public repositories” is the default and ${CFG.repo} is private — then Update and tap Try again.`;
+  }
+  if (repo && !repo.status && e.status === 403) {
+    return `The key reaches ${CFG.repo} but may not read its files (403). ${fix}under Repository permissions set Contents to Read-only (and Actions to Read-only for the watcher line), then Update and tap Try again.`;
+  }
+  if (e.status === 404) return `${CFG.path} is not in the repository yet — run “shiptrack view” once and push.`;
+  return `GitHub refused (${e.status}${e.detail ? ': ' + e.detail : ''}).` + (user ? ` The key belongs to ${user.login}.` : '');
+}
+function showError(msg, detail) {
+  main.innerHTML = `<div class="list">
+    <p class="banner">${esc(msg)}${detail ? `<br><small>${esc(detail)}</small>` : ''}</p>
+    <p class="links" style="margin-top:12px"><a href="#" data-retry>Try again</a><a href="#" data-newkey>Use a different key</a></p>
+  </div>`;
+  main.querySelector('[data-retry]').onclick = ev => { ev.preventDefault(); load(); };
+  main.querySelector('[data-newkey]').onclick = ev => { ev.preventDefault(); store.del(KEYS.token); store.del(KEYS.cache); showSetup(); };
+}
 
 async function load(silent = false) {
   if (!token()) return showSetup();
@@ -288,13 +317,13 @@ async function load(silent = false) {
     store.set(KEYS.cache, JSON.stringify(state));
     render(state, null);
   } catch (e) {
-    if (e.status === 401) { store.del(KEYS.token); return showSetup('GitHub rejected the key — it has expired or lacks the Contents permission. Make a new one.'); }
+    if (e.status === 401) { store.del(KEYS.token); return showSetup('GitHub does not recognise the key (401) — it was mistyped or has expired. Make a new one.'); }
     const cached = store.get(KEYS.cache);
-    const msg = e.status === 404 ? 'view.json is not in the repository yet — run “shiptrack view” once and push.'
-      : e.status === 403 ? 'GitHub refused (403) — the key may lack access to the organon repository.'
-      : `Could not reach GitHub (${e.message}). ` + (cached ? 'Showing the last data this phone saw.' : '');
-    if (cached && !state) state = JSON.parse(cached);
-    if (state) render(state, msg); else main.innerHTML = `<div class="list"><p class="banner">${esc(msg)}</p></div>`;
+    let msg;
+    if (e.status === 403 || e.status === 404) msg = await diagnose(e);
+    else msg = `Could not reach GitHub (${e.message}). ` + (cached ? 'Showing the last data this phone saw.' : '');
+    if (cached && !state) { try { state = JSON.parse(cached); } catch (_) { state = null; } }
+    if (state) render(state, msg); else showError(msg, e.detail ? `GitHub said: ${e.detail}` : '');
   } finally { btn.classList.remove('busy'); }
 }
 
