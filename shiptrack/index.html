@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shipments</title>
+<meta name="description" content="Where every Sophia parcel is right now — read from the private shipment registry.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Shipments">
+<meta name="theme-color" content="#1c2b3a">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root {
+  --bg: #f4f2ed; --panel: #ffffff; --ink: #1d232a; --muted: #5d6673; --line: #e3dfd6;
+  --head: #1c2b3a; --head-ink: #f4f2ed; --accent: #2563eb;
+  --moving: #2563eb; --ofd: #d97706; --attention: #7c3aed; --mismatch: #dc2626;
+  --verified: #059669; --unverified: #b45309; --closed: #6b7280; --warn: #b91c1c;
+  --radius: 14px; --pad: 16px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171d; --panel: #1b222b; --ink: #e9e6df; --muted: #9aa3ad; --line: #2b333d;
+    --head: #0f1720; --head-ink: #e9e6df; --accent: #60a5fa;
+    --moving: #60a5fa; --ofd: #fbbf24; --attention: #a78bfa; --mismatch: #f87171;
+    --verified: #34d399; --unverified: #f59e0b; --closed: #9ca3af; --warn: #fca5a5;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171d; --panel: #1b222b; --ink: #e9e6df; --muted: #9aa3ad; --line: #2b333d;
+  --head: #0f1720; --head-ink: #e9e6df; --accent: #60a5fa;
+  --moving: #60a5fa; --ofd: #fbbf24; --attention: #a78bfa; --mismatch: #f87171;
+  --verified: #34d399; --unverified: #f59e0b; --closed: #9ca3af; --warn: #fca5a5;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 16px/1.45 -apple-system, "SF Pro Text", "Helvetica Neue", Segoe UI, Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { font: inherit; color: inherit; }
+
+/* header */
+.top {
+  background: var(--head); color: var(--head-ink);
+  padding: calc(env(safe-area-inset-top) + 10px) var(--pad) 10px;
+  display: flex; align-items: center; gap: 12px;
+  position: sticky; top: 0; z-index: 1000;
+}
+.top h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+.top .fresh { flex: 1; font-size: 13px; opacity: .85; line-height: 1.3; min-width: 0; }
+.top .fresh .stale { color: #fca5a5; opacity: 1; }
+.top .fresh span + span::before { content: " · "; opacity: .6; }
+.iconbtn {
+  background: transparent; border: 1px solid rgba(255,255,255,.35); border-radius: 10px;
+  color: var(--head-ink); width: 40px; height: 40px; display: grid; place-items: center;
+  cursor: pointer; flex: none;
+}
+.iconbtn svg { width: 20px; height: 20px; }
+.iconbtn.busy svg { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* layout */
+.wrap { display: block; }
+#map { height: min(46vh, 420px); background: #dfe6ea; }
+.list { padding: 8px var(--pad) calc(env(safe-area-inset-bottom) + 24px); max-width: 720px; margin: 0 auto; }
+@media (min-width: 900px) {
+  .wrap { display: grid; grid-template-columns: minmax(360px, 1fr) minmax(420px, 620px); }
+  #map { height: calc(100vh - 62px); position: sticky; top: 62px; }
+  .list { max-width: none; }
+}
+
+.banner {
+  margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; font-size: 14px;
+  background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
+}
+.banner.info { background: var(--panel); border-color: var(--line); color: var(--muted); }
+.banner .x { float: right; border: 0; background: none; color: inherit; cursor: pointer; font-size: 18px; line-height: 1; padding: 0 0 0 10px; }
+
+.summary { color: var(--muted); font-size: 14px; margin: 12px 0 4px; }
+.summary b { color: var(--ink); font-weight: 600; }
+.legend { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: -1px; margin-right: 3px; }
+.legend i.dot { background: var(--moving); }
+.legend i.ring { border: 2px solid var(--moving); width: 8px; height: 8px; }
+.legend span + span::before { content: " · "; }
+
+h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  margin: 22px 0 8px; font-weight: 600; display: flex; align-items: baseline; gap: 8px;
+}
+h2 .n { color: var(--ink); }
+h2 button { margin-left: auto; border: 0; background: none; color: var(--accent); cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 14px; }
+.empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+
+/* cards */
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; margin: 0 0 10px; border-left-width: 5px;
+}
+.card.g-moving { border-left-color: var(--moving); }
+.card.s-out_for_delivery { border-left-color: var(--ofd); }
+.card.g-attention { border-left-color: var(--attention); }
+.card.s-delivered_mismatch { border-left-color: var(--mismatch); }
+.card.s-delivered_unverified { border-left-color: var(--unverified); }
+.card.g-done { border-left-color: var(--closed); }
+.card.s-delivered_verified { border-left-color: var(--verified); }
+.card.hi { box-shadow: 0 0 0 2px var(--accent) inset; }
+.card header { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.card .who { flex: 1; min-width: 0; }
+.card .who b { font-weight: 650; font-size: 17px; }
+.card .who .inv { color: var(--muted); font-size: 14px; margin-left: 8px; white-space: nowrap; }
+.chip {
+  flex: none; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  color: #fff; background: var(--closed); white-space: nowrap; margin-top: 2px;
+}
+.chip.s-registered, .chip.s-in_transit { background: var(--moving); }
+.chip.s-out_for_delivery { background: var(--ofd); }
+.chip.s-delivered_pending_verification { background: var(--attention); }
+.chip.s-delivered_mismatch { background: var(--mismatch); }
+.chip.s-delivered_unverified { background: var(--unverified); }
+.chip.s-delivered_verified { background: var(--verified); }
+.where { margin: 8px 0 2px; font-size: 15px; }
+.where b { font-weight: 600; }
+.where .ago { color: var(--muted); }
+.where button { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 14px; }
+.scan { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.meta { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+.meta span + span::before { content: " · "; }
+.more { display: none; margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 14px; }
+.card.open .more { display: block; }
+.more h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 12px 0 4px; font-weight: 600; }
+.more h3:first-child { margin-top: 0; }
+.more p { margin: 0 0 4px; }
+.links a + a::before { content: " · "; color: var(--muted); }
+.scans { list-style: none; margin: 0; padding: 0; }
+.scans li { display: grid; grid-template-columns: 5.2em 1fr; gap: 8px; padding: 3px 0; border-top: 1px dashed var(--line); }
+.scans li:first-child { border-top: 0; }
+.scans time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; line-height: 1.5; }
+.scans .k-OUT_FOR_DELIVERY, .scans .k-DELIVERED { font-weight: 600; }
+.scans .k-EXCEPTION { color: var(--mismatch); font-weight: 600; }
+.scans small { color: var(--muted); display: block; }
+.notes { white-space: pre-wrap; color: var(--muted); font-size: 13px; }
+
+/* setup */
+.setup { max-width: 560px; margin: 0 auto; padding: 24px var(--pad) 48px; }
+.setup h2 { text-transform: none; letter-spacing: 0; font-size: 20px; color: var(--ink); margin: 0 0 8px; }
+.setup p, .setup li { font-size: 15px; }
+.setup ol { padding-left: 22px; }
+.setup input {
+  width: 100%; font: inherit; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink); margin: 10px 0;
+}
+.setup .primary {
+  width: 100%; padding: 12px; border-radius: 10px; border: 0; background: var(--accent); color: #fff;
+  font-weight: 600; cursor: pointer;
+}
+.setup .err { color: var(--warn); font-weight: 600; }
+.foot { color: var(--muted); font-size: 12px; margin: 28px 0 0; text-align: center; }
+.foot button { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 12px; }
+
+/* map bits */
+.leaflet-container { font: inherit; }
+.leaflet-tooltip.lbl {
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  padding: 3px 8px; font-size: 12px; font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.15); white-space: nowrap;
+}
+.leaflet-tooltip.lbl::before { display: none; }
+.fit { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>Shipments</h1>
+  <div class="fresh" id="fresh"></div>
+  <button class="iconbtn" id="refresh" title="Refresh" aria-label="Refresh">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+  </button>
+</header>
+
+<main id="main"></main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+'use strict';
+const CFG = {
+  owner: 'chrisivarwester', repo: 'organon', branch: 'main',
+  path: 'projects/shiptrack/view.json', folder: 'projects/shiptrack',
+  workflow: 'shiptrack-watch.yml',
+  expectedPassMin: 75,                       // pinger 30 min, cron hourly: silence beyond this is worth a line
+  refreshEveryMs: 5 * 60 * 1000, staleAfterMs: 2 * 60 * 1000,
+};
+const KEYS = { token: 'shiptrack.token', cache: 'shiptrack.cache', hint: 'shiptrack.hint.dismissed', done: 'shiptrack.done.open' };
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const main = document.getElementById('main');
+let state = null, map = null, layer = null, markers = {}, timer = null;
+const openCards = new Set();
+
+// ---------------------------------------------------------------- time & distance
+function parseIso(s) {
+  if (!s) return null;
+  let t = String(s).trim();
+  if (!/([zZ]|[+-]\d\d:?\d\d)$/.test(t)) t += 'Z';      // the registry's naive stamps are UTC
+  const d = new Date(t);
+  return isNaN(d) ? null : d;
+}
+function rel(s, now = Date.now()) {
+  const d = parseIso(s); if (!d) return '';
+  let m = Math.round((now - d.getTime()) / 60000);
+  const fut = m < 0; m = Math.abs(m);
+  let out = m < 1 ? 'just now' : m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d`;
+  if (out === 'just now') return out;
+  return fut ? `in ${out}` : `${out} ago`;
+}
+const fmtAbs = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const fmtShort = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+function abs(s) { const d = parseIso(s); return d ? fmtAbs.format(d) : ''; }
+function short(s) { const d = parseIso(s); return d ? fmtShort.format(d).replace(',', '') : ''; }
+function km(lat1, lon1, lat2, lon2) {
+  const R = 6371, p = Math.PI / 180;
+  const a = Math.sin((lat2 - lat1) * p / 2) ** 2 + Math.cos(lat1 * p) * Math.cos(lat2 * p) * Math.sin((lon2 - lon1) * p / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function fmtKm(d) {
+  if (d < 1) return `${Math.round(d * 1000)} m`;
+  if (d < 100) return `${d.toFixed(1)} km`;
+  return `${Math.round(d).toLocaleString()} km`;
+}
+function shortName(s) {
+  let t = String(s || '').replace(/\(.*?\)/g, '').trim();
+  if (t.includes('<-')) t = t.split('<-')[1];
+  if (t.includes('->')) t = t.split('->')[0];
+  t = t.split(' - ')[0].split(',')[0].trim();
+  const w = t.split(/\s+/).filter(Boolean);
+  if (!w.length) return s || '?';
+  if (/^(LLC|Inc\.?|Ltd\.?|ApS|GmbH|AG|SA)$/i.test(w[w.length - 1]) && w.length > 1) return w[0];
+  return w[w.length - 1];
+}
+const colour = sh => ({ out_for_delivery: 'var(--ofd)', delivered_mismatch: 'var(--mismatch)', delivered_unverified: 'var(--unverified)', delivered_verified: 'var(--verified)' })[sh.status]
+  || ({ moving: 'var(--moving)', attention: 'var(--attention)', done: 'var(--closed)' })[sh.group];
+const cssVar = v => getComputedStyle(document.documentElement).getPropertyValue(v.replace(/^var\((.*)\)$/, '$1')).trim() || '#888';
+
+// ---------------------------------------------------------------- GitHub
+function token() { return store.get(KEYS.token) || ''; }
+async function gh(path, raw = false) {
+  const res = await fetch('https://api.github.com' + path, {
+    cache: 'no-store',
+    headers: {
+      'Authorization': 'Bearer ' + token(),
+      'Accept': raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!res.ok) { const e = new Error(`GitHub answered ${res.status}`); e.status = res.status; throw e; }
+  return res.json();
+}
+const R = `/repos/${CFG.owner}/${CFG.repo}`;
+
+async function load(silent = false) {
+  if (!token()) return showSetup();
+  const btn = document.getElementById('refresh'); btn.classList.add('busy');
+  try {
+    const [view, commits, runs] = await Promise.all([
+      gh(`${R}/contents/${CFG.path}?ref=${CFG.branch}`, true),
+      gh(`${R}/commits?path=${encodeURIComponent(CFG.folder)}&sha=${CFG.branch}&per_page=1`).catch(() => null),
+      gh(`${R}/actions/workflows/${CFG.workflow}/runs?per_page=1`).catch(e => ({ error: e.status || 'network' })),
+    ]);
+    state = {
+      view, fetched: Date.now(),
+      updated: commits && commits[0] ? commits[0].commit.committer.date : null,
+      run: runs && runs.workflow_runs ? runs.workflow_runs[0] || null : null,
+      runError: runs && runs.error ? runs.error : null,
+    };
+    store.set(KEYS.cache, JSON.stringify(state));
+    render(state, null);
+  } catch (e) {
+    if (e.status === 401) { store.del(KEYS.token); return showSetup('GitHub rejected the key — it has expired or lacks the Contents permission. Make a new one.'); }
+    const cached = store.get(KEYS.cache);
+    const msg = e.status === 404 ? 'view.json is not in the repository yet — run “shiptrack view” once and push.'
+      : e.status === 403 ? 'GitHub refused (403) — the key may lack access to the organon repository.'
+      : `Could not reach GitHub (${e.message}). ` + (cached ? 'Showing the last data this phone saw.' : '');
+    if (cached && !state) state = JSON.parse(cached);
+    if (state) render(state, msg); else main.innerHTML = `<div class="list"><p class="banner">${esc(msg)}</p></div>`;
+  } finally { btn.classList.remove('busy'); }
+}
+
+// ---------------------------------------------------------------- setup
+function showSetup(err) {
+  const url = 'https://github.com/settings/personal-access-tokens/new';
+  main.innerHTML = `
+  <section class="setup">
+    <h2>Connect this page to the shipment registry</h2>
+    ${err ? `<p class="err">${esc(err)}</p>` : ''}
+    <p>The page reads <code>${esc(CFG.path)}</code> in the private <b>${esc(CFG.repo)}</b> repository, which the delivery watcher keeps up to date. It needs a read-only key so that only you can open it. The key is stored on this phone and nowhere else.</p>
+    <ol>
+      <li>Open <a href="${url}" target="_blank" rel="noopener">github.com → Settings → Developer settings → Fine-grained tokens → Generate</a> (you must be signed in as ${esc(CFG.owner)}).</li>
+      <li><b>Token name:</b> Shipments on iPhone. <b>Expiration:</b> one year — the longest GitHub allows; the page will ask again then.</li>
+      <li><b>Repository access:</b> Only select repositories → <b>${esc(CFG.repo)}</b>.</li>
+      <li><b>Repository permissions:</b> <b>Contents → Read-only</b>; and <b>Actions → Read-only</b>, which lets the header say when the watcher last ran. Nothing else.</li>
+      <li>Generate, copy the key (it starts with <code>github_pat_</code>), paste it here.</li>
+    </ol>
+    <input id="tok" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…">
+    <button class="primary" id="save">Save and open</button>
+    <p class="foot">Nothing about a shipment is stored on this page or on the public site; the data stays in the private repository and travels straight to this phone.</p>
+  </section>`;
+  document.getElementById('save').onclick = () => {
+    const v = document.getElementById('tok').value.trim();
+    if (!v) return;
+    store.set(KEYS.token, v);
+    load();
+  };
+  document.getElementById('tok').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('save').click(); });
+}
+
+// ---------------------------------------------------------------- render
+function positionLine(sh) {
+  const p = sh.position, d = sh.dest;
+  const canDist = p && d && d.lat != null && p.lat != null;
+  const dist = canDist ? km(p.lat, p.lon, d.lat, d.lon) : null;
+  const fly = `<button data-fly="${esc(sh.awb)}" title="Show on the map">map</button>`;
+  if (!p) return `<p class="where"><b>${esc(sh.position_note || 'No position on record')}</b></p>`;
+  if (p.source === 'tive') {
+    const tail = dist != null ? (dist < 0.5 ? 'at the destination' : `${fmtKm(dist)} from the destination`) : '';
+    return `<p class="where"><b>Tracker fix</b> <span class="ago">${esc(rel(p.time))}${p.method ? ` (${esc(p.method)})` : ''}</span>${tail ? ` — ${esc(tail)}` : ''} ${fly}</p>`;
+  }
+  if (p.source === 'delivered') {
+    const pod = sh.pod && sh.pod.signed_by ? `, signed by ${esc(sh.pod.signed_by)}` : '';
+    return `<p class="where"><b>Delivered</b> <span class="ago">${esc(abs(sh.delivered_at || p.time))}</span>${pod} ${fly}</p>`;
+  }
+  if (p.source === 'scan') {
+    const tail = dist != null && dist > 5 ? ` — about ${fmtKm(dist)} to go` : '';
+    return `<p class="where"><b>${esc(p.label)}</b> <span class="ago">last scan ${esc(rel(p.time))}</span>${esc(tail)} ${fly}</p>`;
+  }
+  return `<p class="where"><b>Not scanned yet</b> <span class="ago">booked ${esc(rel(sh.created))}</span> ${fly}</p>`;
+}
+function trackerBits(sh) {
+  return (sh.trackers || []).map(t => {
+    if (t.kind === 'tive') return `Tive ${esc(t.name)}`;
+    if (t.kind === 'airtag') return `${esc(t.model ? 'Find My tag' : 'AirTag')} “${esc(t.name)}”`;
+    return esc(t.kind);
+  });
+}
+// DHL appends the same sentence to every customs scan ("Note - The Customs
+// clearance process may start while the shipment is in transit…"); the fact
+// stays, the boilerplate goes.
+const tidy = d => String(d || '').split(/\s+Note\s+-\s+/)[0].trim();
+function card(sh) {
+  const last = sh.last_scan;
+  const carrier = (sh.carrier || '').toUpperCase();
+  const meta = [`→ ${esc(sh.dest.address || '?')}`, `${esc(carrier)} ${esc(sh.awb)}`, ...trackerBits(sh)];
+  if (sh.kind === 'return') meta.unshift('Return leg');
+  const scans = (sh.scans || []).map(e => `<li><time>${esc(short(e.time))}</time><div class="k-${esc(e.kind)}">${esc(tidy(e.desc))}${e.location ? `<small>${esc(e.location)}</small>` : ''}</div></li>`).join('');
+  const links = [];
+  if (sh.links && sh.links.carrier) links.push(`<a href="${esc(sh.links.carrier)}" target="_blank" rel="noopener">Track at ${esc(carrier)}</a>`);
+  (sh.trackers || []).forEach(t => { if (t.url) links.push(`<a href="${esc(t.url)}" target="_blank" rel="noopener">Live Tive map (${esc(t.name)})</a>`); });
+  if (sh.dest.lat != null) links.push(`<a href="https://maps.apple.com/?ll=${sh.dest.lat},${sh.dest.lon}&q=${encodeURIComponent(sh.dest.address || 'Destination')}" target="_blank" rel="noopener">Destination in Maps</a>`);
+  if (sh.position && sh.position.source === 'tive') links.push(`<a href="https://maps.apple.com/?ll=${sh.position.lat},${sh.position.lon}&q=Tracker" target="_blank" rel="noopener">Tracker fix in Maps</a>`);
+  const pod = sh.pod ? `<p>Proof of delivery: ${sh.pod.signed_by ? `signed by <b>${esc(sh.pod.signed_by)}</b>` : 'captured'}${sh.pod.timestamp ? ` at ${esc(abs(sh.pod.timestamp))}` : ''}${sh.pod.signed_pdf ? ' — signed ePOD with signature image is in the repository' : ''}.</p>` : '';
+  const unresolved = (sh.unresolved_places || []).length ? `<p class="notes">Hubs without a map position yet: ${esc(sh.unresolved_places.join('; '))}</p>` : '';
+  return `
+  <article class="card g-${esc(sh.group)} s-${esc(sh.status)}${openCards.has(sh.awb) ? ' open' : ''}" id="c-${esc(sh.awb)}" data-awb="${esc(sh.awb)}">
+    <header data-toggle="${esc(sh.awb)}">
+      <div class="who"><b>${esc(sh.customer)}</b>${sh.invoice && sh.invoice !== '-' ? `<span class="inv">inv ${esc(sh.invoice)}</span>` : ''}</div>
+      <span class="chip s-${esc(sh.status)}">${esc(sh.label)}</span>
+    </header>
+    ${positionLine(sh)}
+    ${last ? `<p class="scan">${esc(tidy(last.desc))}${last.location ? ` — ${esc(last.location)}` : ''}</p>` : ''}
+    <p class="meta">${meta.map(m => `<span>${m}</span>`).join('')}</p>
+    <div class="more">
+      <h3>Destination</h3><p>${esc(sh.dest.address || '?')}${sh.dest.pin_source && sh.dest.pin_source.includes('postcode') ? ' <small>(pin is the postcode centroid)</small>' : ''}</p>
+      ${links.length ? `<h3>Open</h3><p class="links">${links.join('')}</p>` : ''}
+      ${pod}
+      <h3>Scans, newest first</h3>
+      ${scans ? `<ul class="scans">${scans}</ul>` : '<p class="empty">No carrier scan yet.</p>'}
+      ${sh.notes ? `<h3>Notes</h3><p class="notes">${esc(sh.notes)}</p>` : ''}
+      ${unresolved}
+    </div>
+  </article>`;
+}
+function orderMoving(a, b) {
+  const rank = s => s.status === 'out_for_delivery' ? 0 : s.status === 'in_transit' ? 1 : 2;
+  if (rank(a) !== rank(b)) return rank(a) - rank(b);
+  return lastActivity(b) - lastActivity(a);
+}
+function lastActivity(sh) {
+  const c = [sh.delivered_at, sh.created, sh.last_scan && sh.last_scan.time, sh.position && sh.position.time].map(parseIso).filter(Boolean);
+  return c.length ? Math.max(...c.map(d => d.getTime())) : 0;
+}
+function freshness(st) {
+  const bits = [];
+  if (st.updated) bits.push(`<span>registry updated ${esc(rel(st.updated))}</span>`);
+  const active = st.view.shipments.some(s => s.group !== 'done');
+  if (st.run) {
+    const t = st.run.run_started_at || st.run.updated_at;
+    const ageMin = (Date.now() - parseIso(t).getTime()) / 60000;
+    const stale = active && ageMin > CFG.expectedPassMin;
+    const bad = st.run.conclusion && st.run.conclusion !== 'success' && st.run.status === 'completed';
+    bits.push(`<span class="${stale || bad ? 'stale' : ''}">watcher ran ${esc(rel(t))}${bad ? ` and ${esc(st.run.conclusion)}` : ''}${stale ? ' — expected every 30–60 min' : ''}</span>`);
+  } else if (st.runError === 403 || st.runError === 404) {
+    bits.push(`<span title="Give the key Actions → Read-only to see when the watcher last ran">watcher: no Actions permission</span>`);
+  }
+  return bits.join('');
+}
+function render(st, warning) {
+  const v = st.view;
+  const groups = { moving: [], attention: [], done: [] };
+  v.shipments.forEach(s => (groups[s.group] || groups.done).push(s));
+  groups.moving.sort(orderMoving);
+  groups.attention.sort((a, b) => lastActivity(b) - lastActivity(a));
+  groups.done.sort((a, b) => lastActivity(b) - lastActivity(a));
+  document.getElementById('fresh').innerHTML = freshness(st);
+
+  const hint = !store.get(KEYS.hint) && !window.navigator.standalone && /iPhone|iPad/.test(navigator.userAgent)
+    ? `<p class="banner info" id="hint">Add this page to your Home Screen (Share → Add to Home Screen) and it opens like an app.<button class="x" data-hint aria-label="Dismiss">×</button></p>` : '';
+  const doneOpen = store.get(KEYS.done) === '1';
+  const sum = [];
+  if (groups.moving.length) sum.push(`<b>${groups.moving.length}</b> on the move`);
+  if (groups.attention.length) sum.push(`<b>${groups.attention.length}</b> delivered, awaiting a verdict`);
+  if (groups.done.length) sum.push(`<b>${groups.done.length}</b> finished in the last ${v.recent_days} days`);
+  if (!v.shipments.length) sum.push('Nothing is being tracked right now.');
+
+  main.innerHTML = `
+  <div class="wrap">
+    <div id="map"></div>
+    <div class="list">
+      <p class="legend"><span><i class="dot"></i>where the parcel is</span><span><i class="ring"></i>its destination</span><span>dashed line = the route so far</span></p>
+      ${warning ? `<p class="banner">${esc(warning)}</p>` : ''}
+      ${hint}
+      <p class="summary">${sum.join(' · ')}${warning ? '' : ` <span style="white-space:nowrap">· fetched ${esc(rel(st.fetched ? new Date(st.fetched).toISOString() : ''))}</span>`}</p>
+      <h2>On the move <span class="n">${groups.moving.length}</span></h2>
+      ${groups.moving.map(card).join('') || '<p class="empty">No parcel is travelling.</p>'}
+      <h2>Delivered — needs a look <span class="n">${groups.attention.length}</span></h2>
+      ${groups.attention.map(card).join('') || '<p class="empty">Nothing waiting for a verdict.</p>'}
+      <h2>Finished <span class="n">${groups.done.length}</span>${groups.done.length ? `<button data-done>${doneOpen ? 'Hide' : 'Show'}</button>` : ''}</h2>
+      <div id="done" style="display:${doneOpen ? 'block' : 'none'}">${groups.done.map(card).join('')}</div>
+      <p class="foot">Data: ${esc(CFG.repo)}/${esc(CFG.path)}, written by the delivery watcher. Map © OpenStreetMap contributors. <button data-forget>Forget this phone's key</button></p>
+    </div>
+  </div>`;
+  wire();
+  drawMap(v, groups);
+}
+function wire() {
+  main.querySelectorAll('[data-toggle]').forEach(h => h.onclick = () => toggle(h.dataset.toggle));
+  main.querySelectorAll('[data-fly]').forEach(b => b.onclick = e => { e.stopPropagation(); fly(b.dataset.fly); });
+  const d = main.querySelector('[data-done]');
+  if (d) d.onclick = () => { const box = document.getElementById('done'); const open = box.style.display === 'none'; box.style.display = open ? 'block' : 'none'; d.textContent = open ? 'Hide' : 'Show'; store.set(KEYS.done, open ? '1' : '0'); };
+  const h = main.querySelector('[data-hint]');
+  if (h) h.onclick = () => { store.set(KEYS.hint, '1'); document.getElementById('hint').remove(); };
+  const f = main.querySelector('[data-forget]');
+  if (f) f.onclick = () => { if (confirm('Remove the GitHub key from this phone? The page will ask for one again.')) { store.del(KEYS.token); store.del(KEYS.cache); showSetup(); } };
+}
+function toggle(awb, force) {
+  const el = document.getElementById('c-' + awb); if (!el) return;
+  const open = force != null ? force : !el.classList.contains('open');
+  el.classList.toggle('open', open);
+  if (open) openCards.add(awb); else openCards.delete(awb);
+}
+function fly(awb) {
+  const m = markers[awb]; if (!m || !map) return;
+  map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 9), { duration: .8 });
+  m.openTooltip();
+  document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---------------------------------------------------------------- map
+function drawMap(v, groups) {
+  if (map) { map.remove(); map = null; }
+  markers = {};
+  map = L.map('map', { zoomControl: false, worldCopyJump: true });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+  const Fit = L.Control.extend({ onAdd() { const b = L.DomUtil.create('button', 'fit'); b.textContent = 'Fit all'; b.onclick = () => fitAll(); return b; } });
+  new Fit({ position: 'topright' }).addTo(map);
+  layer = L.layerGroup().addTo(map);
+  const pts = [];
+  const show = [...groups.moving, ...groups.attention];
+  const fallback = show.length ? show : v.shipments;
+  fallback.forEach(sh => {
+    const c = cssVar(colour(sh));
+    const p = sh.position, d = sh.dest;
+    const path = (sh.path || []).map(h => [h.lat, h.lon]);
+    if (p && p.source === 'tive' && path.length) path.push([p.lat, p.lon]);
+    if (path.length > 1) L.polyline(path, { color: c, weight: 2, opacity: .75, dashArray: '6 6' }).addTo(layer);
+    if (p && d && d.lat != null && !String(sh.status).startsWith('delivered') && sh.status !== 'closed') {
+      L.polyline([[p.lat, p.lon], [d.lat, d.lon]], { color: '#888', weight: 1.5, opacity: .6, dashArray: '2 8' }).addTo(layer);
+    }
+    if (d && d.lat != null) {
+      L.circleMarker([d.lat, d.lon], { radius: 5, color: c, weight: 2, fillColor: 'transparent', fillOpacity: 0 })
+        .bindTooltip(`${esc(shortName(sh.customer))} — destination`, { direction: 'top' }).addTo(layer);
+      if (show.includes(sh)) pts.push([d.lat, d.lon]);
+    }
+    if (p && p.lat != null) {
+      // A standing label only for parcels on the move — the delivered ones
+      // cluster on the destinations and their labels would cover each other.
+      const m = L.circleMarker([p.lat, p.lon], { radius: 8, color: '#fff', weight: 2, fillColor: c, fillOpacity: 1 })
+        .bindTooltip(`${esc(shortName(sh.customer))}${sh.kind === 'return' ? ' (return)' : ''} · ${esc(sh.label)}`,
+          { permanent: sh.group === 'moving', direction: 'top', offset: [0, -8], className: 'lbl' })
+        .addTo(layer);
+      m.on('click', () => { toggle(sh.awb, true); document.getElementById('c-' + sh.awb).scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+      markers[sh.awb] = m;
+      if (show.includes(sh)) pts.push([p.lat, p.lon]);
+    }
+  });
+  fitAll(pts);
+}
+function fitAll(pts) {
+  if (!map) return;
+  if (!pts) { pts = []; Object.values(markers).forEach(m => pts.push([m.getLatLng().lat, m.getLatLng().lng])); }
+  if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 10 });
+  else if (pts.length === 1) map.setView(pts[0], 9);
+  else map.setView([55.67, 12.56], 3);
+}
+
+// ---------------------------------------------------------------- lifecycle
+document.getElementById('refresh').onclick = () => load();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state && Date.now() - state.fetched > CFG.staleAfterMs) load(true);
+});
+setInterval(() => { if (document.visibilityState === 'visible' && token()) load(true); }, CFG.refreshEveryMs);
+window.addEventListener('online', () => { if (token()) load(true); });
+load();
+</script>
+</body>
+</html>
