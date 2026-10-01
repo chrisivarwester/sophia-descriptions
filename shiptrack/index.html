@@ -387,6 +387,11 @@ function trackerBits(sh) {
 // clearance process may start while the shipment is in transit…"); the fact
 // stays, the boilerplate goes.
 const tidy = d => String(d || '').split(/\s+Note\s+-\s+/)[0].trim();
+// A Find My "Share Item Location" link dies after Apple's 7 days; the
+// registry carries the date and the page stops offering the link after it.
+const day = s => { const d = new Date(`${s}T12:00:00`); return isNaN(d) ? s : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+const shareExpired = t => !!t.share_expires && new Date(`${t.share_expires}T23:59:59`) < new Date();
+const APPLE_PHONE = /iPhone|iPad|iPod/.test(navigator.userAgent);
 function card(sh) {
   const last = sh.last_scan;
   const carrier = (sh.carrier || '').toUpperCase();
@@ -395,7 +400,15 @@ function card(sh) {
   const scans = (sh.scans || []).map(e => `<li><time>${esc(short(e.time))}</time><div class="k-${esc(e.kind)}">${esc(tidy(e.desc))}${e.location ? `<small>${esc(e.location)}</small>` : ''}</div></li>`).join('');
   const links = [];
   if (sh.links && sh.links.carrier) links.push(`<a href="${esc(sh.links.carrier)}" target="_blank" rel="noopener">Track at ${esc(carrier)}</a>`);
-  (sh.trackers || []).forEach(t => { if (t.url) links.push(`<a href="${esc(t.url)}" target="_blank" rel="noopener">Live Tive map (${esc(t.name)})</a>`); });
+  (sh.trackers || []).forEach(t => {
+    if (!t.url) return;
+    if (t.kind === 'tive') links.push(`<a href="${esc(t.url)}" target="_blank" rel="noopener">Live Tive map (${esc(t.name)})</a>`);
+    else if (t.kind === 'airtag' && !shareExpired(t)) links.push(`<a href="${esc(t.url)}" target="_blank" rel="noopener">AirTag “${esc(t.name)}” on find.apple.com${t.share_expires ? ` (until ${esc(day(t.share_expires))})` : ''}</a>`);
+  });
+  // Apple gives no script an AirTag's position, so the tag never places the
+  // parcel here; on the phone the Find My app is one tap away instead
+  // (findmy://items opens its Items tab, iOS 14.3+).
+  if (APPLE_PHONE && (sh.trackers || []).some(t => t.kind === 'airtag')) links.push(`<a href="findmy://items">Open Find My</a>`);
   if (sh.dest.lat != null) links.push(`<a href="https://maps.apple.com/?ll=${sh.dest.lat},${sh.dest.lon}&q=${encodeURIComponent(sh.dest.address || 'Destination')}" target="_blank" rel="noopener">Destination in Maps</a>`);
   if (sh.position && sh.position.source === 'tive') links.push(`<a href="https://maps.apple.com/?ll=${sh.position.lat},${sh.position.lon}&q=Tracker" target="_blank" rel="noopener">Tracker fix in Maps</a>`);
   const pod = sh.pod ? `<p>Proof of delivery: ${sh.pod.signed_by ? `signed by <b>${esc(sh.pod.signed_by)}</b>` : 'captured'}${sh.pod.timestamp ? ` at ${esc(abs(sh.pod.timestamp))}` : ''}${sh.pod.signed_pdf ? ' — signed ePOD with signature image is in the repository' : ''}.</p>` : '';
